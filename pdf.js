@@ -100,58 +100,7 @@ async function handleFileSelect(e) {
 // ====================================
 
 async function convertPdfToWord(pdfFile) {
-    try {
-        updateProgress(10, 'Loading PDF document...');
-        const pdf = await pdfjsLib.getDocument(await readFileAsArrayBuffer(pdfFile)).promise;
-        
-        updateProgress(30, 'Extracting text content...');
-        
-        // Check if docx library is available
-        if (!window.docx) {
-            throw new Error("Word conversion library not loaded. Using simple text fallback.");
-        }
-        
-        const { docx } = window;
-        const paragraphs = [];
-        
-        for (let i = 1; i <= pdf.numPages; i++) {
-            if (abortController.signal.aborted) throw new Error('Conversion cancelled');
-            
-            updateProgress(30 + (i / pdf.numPages * 50), `Processing page ${i} of ${pdf.numPages}...`);
-            const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const text = textContent.items.map(item => item.str).join(' ');
-            
-            paragraphs.push(
-                new docx.Paragraph({
-                    children: [new docx.TextRun(text)],
-                    spacing: { after: 200 }
-                })
-            );
-        }
-        
-        updateProgress(90, 'Generating Word document...');
-        const doc = new docx.Document({
-            sections: [{
-                properties: {},
-                children: paragraphs
-            }]
-        });
-        
-        const buffer = await docx.Packer.toBuffer(doc);
-        return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-    } catch (error) {
-        if (error.message.includes("Word conversion library")) {
-            // Fallback to simple text extraction if docx library fails
-            return await simplePdfToWordFallback(pdfFile);
-        }
-        throw error;
-    }
-}
-
-// Fallback function when docx.js isn't available
-async function simplePdfToWordFallback(pdfFile) {
-    updateProgress(10, 'Loading PDF document (fallback mode)...');
+    updateProgress(10, 'Loading PDF document...');
     const pdf = await pdfjsLib.getDocument(await readFileAsArrayBuffer(pdfFile)).promise;
     
     updateProgress(30, 'Extracting text content...');
@@ -175,7 +124,8 @@ async function simplePdfToWordFallback(pdfFile) {
     const rtfContent = fullText.replace(/\n/g, '\\par\n');
     
     return new Blob([rtfHeader + rtfContent + rtfFooter], { 
-        type: 'application/rtf' 
+        type: 'application/rtf',
+        endings: 'transparent'
     });
 }
 
