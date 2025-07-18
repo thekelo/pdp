@@ -104,7 +104,19 @@ async function convertPdfToWord(pdfFile) {
     const pdf = await pdfjsLib.getDocument(await readFileAsArrayBuffer(pdfFile)).promise;
     
     updateProgress(30, 'Extracting text content...');
-    let fullText = '';
+    let htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Converted PDF Document</title>
+            <style>
+                body { font-family: Arial, sans-serif; line-height: 1.5; }
+                .page-break { page-break-after: always; }
+            </style>
+        </head>
+        <body>
+    `;
     
     for (let i = 1; i <= pdf.numPages; i++) {
         if (abortController.signal.aborted) throw new Error('Conversion cancelled');
@@ -112,19 +124,35 @@ async function convertPdfToWord(pdfFile) {
         updateProgress(30 + (i / pdf.numPages * 60), `Processing page ${i} of ${pdf.numPages}...`);
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
-        const text = textContent.items.map(item => item.str).join(' ');
-        fullText += text + '\n\n';
+        
+        // Process text items while preserving some formatting
+        let pageContent = '';
+        let currentY = null;
+        
+        textContent.items.forEach(item => {
+            // Add paragraph breaks when vertical position changes significantly
+            if (currentY === null || Math.abs(currentY - item.transform[5]) > 20) {
+                pageContent += '<p>';
+                currentY = item.transform[5];
+            }
+            pageContent += item.str + ' ';
+        });
+        
+        htmlContent += `<div>${pageContent.replace(/<p>\s*<\/p>/g, '')}</div>`;
+        
+        // Add page break except after last page
+        if (i < pdf.numPages) {
+            htmlContent += '<div class="page-break"></div>';
+        }
     }
+    
+    htmlContent += `</body></html>`;
     
     updateProgress(95, 'Creating Word file...');
     
-    // Create a simple RTF document (works in Word)
-    const rtfHeader = `{\\rtf1\\ansi\\ansicpg1252\\deff0\\nouicompat\\deflang1033{\\fonttbl{\\f0\\fnil\\fcharset0 Calibri;}}\n{\\*\\generator Riched20 10.0.19041}\\viewkind4\\uc1\n\\pard\\sa200\\sl276\\slmult1\\f0\\fs22\\lang9\n`;
-    const rtfFooter = `}\n`;
-    const rtfContent = fullText.replace(/\n/g, '\\par\n');
-    
-    return new Blob([rtfHeader + rtfContent + rtfFooter], { 
-        type: 'application/rtf',
+    // Create a blob with HTML content that Word can open
+    return new Blob([htmlContent], { 
+        type: 'application/msword',
         endings: 'transparent'
     });
 }
@@ -329,10 +357,10 @@ function updateProgress(percent, message) {
 function showProcessingModal() {
     // Set modal content based on tool
     switch(currentTool) {
-        case 'pdf-to-word':
-            modalTitle.textContent = 'Converting PDF to Word';
-            modalMessage.textContent = 'Converting your PDF to an editable Word document...';
-            break;
+        // In your downloadFile function, add this case:
+case 'pdf-to-word':
+    fileName = 'converted-document.docx'; // Using .docx extension
+    break;
         case 'pdf-to-excel':
             modalTitle.textContent = 'Converting PDF to Excel';
             modalMessage.textContent = 'Extracting tables from your PDF to Excel format...';
