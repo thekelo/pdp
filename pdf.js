@@ -100,39 +100,83 @@ async function handleFileSelect(e) {
 // ====================================
 
 async function convertPdfToWord(pdfFile) {
-    updateProgress(10, 'Loading PDF document...');
+    try {
+        updateProgress(10, 'Loading PDF document...');
+        const pdf = await pdfjsLib.getDocument(await readFileAsArrayBuffer(pdfFile)).promise;
+        
+        updateProgress(30, 'Extracting text content...');
+        
+        // Check if docx library is available
+        if (!window.docx) {
+            throw new Error("Word conversion library not loaded. Using simple text fallback.");
+        }
+        
+        const { docx } = window;
+        const paragraphs = [];
+        
+        for (let i = 1; i <= pdf.numPages; i++) {
+            if (abortController.signal.aborted) throw new Error('Conversion cancelled');
+            
+            updateProgress(30 + (i / pdf.numPages * 50), `Processing page ${i} of ${pdf.numPages}...`);
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const text = textContent.items.map(item => item.str).join(' ');
+            
+            paragraphs.push(
+                new docx.Paragraph({
+                    children: [new docx.TextRun(text)],
+                    spacing: { after: 200 }
+                })
+            );
+        }
+        
+        updateProgress(90, 'Generating Word document...');
+        const doc = new docx.Document({
+            sections: [{
+                properties: {},
+                children: paragraphs
+            }]
+        });
+        
+        const buffer = await docx.Packer.toBuffer(doc);
+        return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    } catch (error) {
+        if (error.message.includes("Word conversion library")) {
+            // Fallback to simple text extraction if docx library fails
+            return await simplePdfToWordFallback(pdfFile);
+        }
+        throw error;
+    }
+}
+
+// Fallback function when docx.js isn't available
+async function simplePdfToWordFallback(pdfFile) {
+    updateProgress(10, 'Loading PDF document (fallback mode)...');
     const pdf = await pdfjsLib.getDocument(await readFileAsArrayBuffer(pdfFile)).promise;
     
     updateProgress(30, 'Extracting text content...');
-    const { docx } = window.docx;
-    const paragraphs = [];
+    let fullText = '';
     
     for (let i = 1; i <= pdf.numPages; i++) {
         if (abortController.signal.aborted) throw new Error('Conversion cancelled');
         
-        updateProgress(30 + (i / pdf.numPages * 50), `Processing page ${i} of ${pdf.numPages}...`);
+        updateProgress(30 + (i / pdf.numPages * 60), `Processing page ${i} of ${pdf.numPages}...`);
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
         const text = textContent.items.map(item => item.str).join(' ');
-        
-        paragraphs.push(
-            new docx.Paragraph({
-                children: [new docx.TextRun(text)],
-                spacing: { after: 200 }
-            })
-        );
+        fullText += text + '\n\n';
     }
     
-    updateProgress(90, 'Generating Word document...');
-    const doc = new docx.Document({
-        sections: [{
-            properties: {},
-            children: paragraphs
-        }]
-    });
+    updateProgress(95, 'Creating Word file...');
     
-    const buffer = await docx.Packer.toBuffer(doc);
-    return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    // Create a simple RTF document (works in Word)
+    const rtfHeader = `{\\rtf1\\ansi\\ansicpg1252\\deff0\\nouicompat\\deflang1033{\\fonttbl{\\f0\\fnil\\fcharset0 Calibri;}}\n{\\*\\generator Riched20 10.0.19041}\\viewkind4\\uc1\n\\pard\\sa200\\sl276\\slmult1\\f0\\fs22\\lang9\n`;
+    const rtfFooter = `}\n`;
+    const rtfContent = fullText.replace(/\n/g, '\\par\n');
+    
+    return new Blob([rtfHeader + rtfContent + rtfFooter], { 
+        type: 'application/rtf' 
+    });
 }
 
 async function convertPdfToExcel(pdfFile) {
